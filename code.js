@@ -686,6 +686,13 @@
         throw new Error("Node does not support blend modes");
       node.blendMode = params.blendMode;
       return { success: true };
+    },
+    async set_annotation(params) {
+      const node = await requireNode(params.nodeId);
+      if (!("annotations" in node))
+        throw new Error("Node does not support annotations");
+      node.annotations = params.label ? [{ labelMarkdown: String(params.label) }] : [];
+      return { success: true, annotations: node.annotations };
     }
   };
 
@@ -1516,6 +1523,50 @@
       const children = [...node.children].map(nodeInfo);
       figma.ungroup(node);
       return { success: true, children };
+    },
+    async create_section(params) {
+      var _a;
+      const section = figma.createSection();
+      section.name = (_a = params.name) != null ? _a : "Section";
+      if (params.x !== void 0)
+        section.x = params.x;
+      if (params.y !== void 0)
+        section.y = params.y;
+      if (params.width !== void 0 && params.height !== void 0) {
+        section.resizeWithoutConstraints(params.width, params.height);
+      }
+      if (params.parentId) {
+        const parent = await figma.getNodeByIdAsync(params.parentId);
+        if (parent && "appendChild" in parent)
+          parent.appendChild(section);
+      }
+      return __spreadValues({ success: true }, nodeInfo(section));
+    },
+    async resize_section_to_fit(params) {
+      var _a;
+      const section = await requireNode(params.nodeId);
+      if (section.type !== "SECTION")
+        throw new Error("Node is not a section");
+      const pad = (_a = params.padding) != null ? _a : 100;
+      const children = section.children;
+      if (!children.length)
+        throw new Error("Section has no children");
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const c of children) {
+        minX = Math.min(minX, c.x);
+        minY = Math.min(minY, c.y);
+        maxX = Math.max(maxX, c.x + c.width);
+        maxY = Math.max(maxY, c.y + c.height);
+      }
+      const dx = pad - minX, dy = pad - minY;
+      for (const c of children) {
+        c.x += dx;
+        c.y += dy;
+      }
+      section.x -= dx;
+      section.y -= dy;
+      section.resizeWithoutConstraints(maxX - minX + pad * 2, maxY - minY + pad * 2);
+      return __spreadValues({ success: true }, nodeInfo(section));
     },
     async scroll_to_node(params) {
       const node = await requireNode(params.nodeId);

@@ -352,4 +352,13 @@ export const editHandlers = {
     node.blendMode = params.blendMode;
     return { success: true };
   },
+
+  async set_annotation(params) {
+    // params: nodeId, label (markdown). Empty/omitted label clears annotations.
+    // Native Dev Mode annotations (node.annotations) — NOT Figma comments (REST-only).
+    const node = await requireNode(params.nodeId);
+    if (!('annotations' in node)) throw new Error('Node does not support annotations');
+    node.annotations = params.label ? [{ labelMarkdown: String(params.label) }] : [];
+    return { success: true, annotations: node.annotations };
+  },
 };

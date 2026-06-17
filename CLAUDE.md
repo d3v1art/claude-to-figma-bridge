@@ -62,6 +62,7 @@ curl -s -X POST http://localhost:3571/command \
 - `set_font` — typography (`nodeId`, `family`, `style`, `size`)
 - `set_layout` — auto-layout on FRAME only (`nodeId`, `mode`, `gap`, `padding`) — for components: create Frame with auto-layout first, then `create_component_from_node`
 - `set_effect` — add shadow/effect (`nodeId`, `effectType`, ...)
+- `set_annotation` — Dev Mode annotation on a node (`nodeId`, `label` markdown; empty clears) — native annotations, NOT Figma comments (comments aren't exposed to plugins)
 
 **Variables & modes:**
 - `create_variable_collection` — создать коллекцию (`name`, `modes?: string[]`)
@@ -167,6 +168,8 @@ curl -s -X POST http://localhost:3571/command \
 
 **Structure:**
 - `reparent` — move to new parent (`nodeId`, `newParentId`)
+- `create_section` — new section (`name`, `x`, `y`, `width?`, `height?`, `parentId?`)
+- `resize_section_to_fit` — wrap a section's children with padding, Figma's "Resize to fit" (`nodeId`, `padding?` = 100)
 - `delete_node` — delete (`nodeId`)
 - `batch` — multiple commands in one call (`commands: [{action, ...params}]`); a command may reference an earlier result with `{ "$ref": "<index-or-label>.<path>" }` and be tagged `"as": "<label>"` (see Batching)
 
@@ -314,7 +317,7 @@ So a complex screen — 30 nodes, layout, 50 variable bindings, 20 text override
 - **`set_text` does NOT work on INSTANCE nodes** — use `set_instance_property` with the full property key (e.g. `"Label#2044:0"`). Get keys via `get_instance_properties` first, or reuse keys from previous calls on the same component type.
 - **Fixed-size frames inside auto-layout must have `primaryAxisSizingMode = 'FIXED'` and `counterAxisSizingMode = 'FIXED'`** — if you create a frame with `layoutMode` set and then call `resize(w, h)`, auto-layout will still shrink it to fit content. Always set both sizing modes to `'FIXED'` before `resize()` on any frame that must hold a specific size (circles, icons, avatars).
 - **`set_layout` failures are partial** — if one property in a `set_layout` call throws (e.g. invalid `counterAlign`), properties set before the error DO apply, those after do NOT. Order the properties in `set_layout` to put safe ones first.
-- **Coordinates of nodes inside Figma Sections are RELATIVE to the section**, not absolute page coordinates — and sections do not auto-resize to fit their children. After appending frames to a section: `get_children` to read their boxes, compute the bounding box, `move` each child so the group sits at ~`(100, 100)` padding, then `resize` the section to `bbox + ~100px` on every side (Figma's native "Resize to fit"). Watch the relative-coordinate offset when positioning.
+- **Coordinates of nodes inside Figma Sections are RELATIVE to the section**, not absolute page coordinates — and sections don't auto-resize to fit their children. Use `create_section` to make one and `resize_section_to_fit` (`nodeId`, `padding`) for Figma's native "Resize to fit" — it reflows the children to the padding and wraps the section around them without moving them on the canvas. Keep section children at small relative coordinates.
 
 ### Rules to enforce this
 

@@ -115,6 +115,43 @@ export const structureHandlers = {
     return { success: true, children };
   },
 
+  async create_section(params) {
+    // params: name?, x?, y?, width?, height?, parentId?
+    const section = figma.createSection();
+    section.name = params.name ?? 'Section';
+    if (params.x !== undefined) section.x = params.x;
+    if (params.y !== undefined) section.y = params.y;
+    if (params.width !== undefined && params.height !== undefined) {
+      section.resizeWithoutConstraints(params.width, params.height);
+    }
+    if (params.parentId) {
+      const parent = await figma.getNodeByIdAsync(params.parentId);
+      if (parent && 'appendChild' in parent) parent.appendChild(section);
+    }
+    return { success: true, ...nodeInfo(section) };
+  },
+
+  async resize_section_to_fit(params) {
+    // params: nodeId (a SECTION), padding? (default 100) — Figma's "Resize to fit".
+    // Sections don't auto-resize; this reflows children to `padding` and resizes the
+    // section to their bounding box, keeping the children's absolute canvas positions.
+    const section = await requireNode(params.nodeId);
+    if (section.type !== 'SECTION') throw new Error('Node is not a section');
+    const pad = params.padding ?? 100;
+    const children = section.children;
+    if (!children.length) throw new Error('Section has no children');
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const c of children) {
+      minX = Math.min(minX, c.x);            minY = Math.min(minY, c.y);
+      maxX = Math.max(maxX, c.x + c.width);  maxY = Math.max(maxY, c.y + c.height);
+    }
+    const dx = pad - minX, dy = pad - minY;
+    for (const c of children) { c.x += dx; c.y += dy; }
+    section.x -= dx; section.y -= dy;
+    section.resizeWithoutConstraints((maxX - minX) + pad * 2, (maxY - minY) + pad * 2);
+    return { success: true, ...nodeInfo(section) };
+  },
+
   async scroll_to_node(params) {
     // params: nodeId
     const node = await requireNode(params.nodeId);
