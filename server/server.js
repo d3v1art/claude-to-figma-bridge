@@ -2,12 +2,31 @@ const http = require('http');
 const WebSocket = require('ws');
 
 const PORT = 3571;
+const HOST = '127.0.0.1';              // loopback only — not reachable from the LAN
+const MAX_BODY = 50 * 1024 * 1024;     // 50 MB — base64 image fills can be large
+
 let pluginSocket = null;
 const pending = new Map();
 let reqId = 0;
 
+// curl and native clients send no Origin header; browsers always do. Allow
+// no-origin and localhost, reject anything that looks like a real website —
+// this stops a malicious page you have open in a browser from driving the bridge.
+function isLocalOrigin(origin) {
+  if (!origin || origin === 'null') return true;
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+}
+
 const server = http.createServer((req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+
+  if (origin && !isLocalOrigin(origin)) {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Forbidden origin' }));
+    return;
+  }
+
+  if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Content-Type', 'application/json');
 
   if (req.method === 'GET' && req.url === '/status') {
@@ -24,8 +43,19 @@ const server = http.createServer((req, res) => {
     }
 
     let body = '';
-    req.on('data', chunk => body += chunk);
+    let aborted = false;
+    req.on('data', chunk => {
+      if (aborted) return;
+      body += chunk;
+      if (body.length > MAX_BODY) {
+        aborted = true;
+        res.writeHead(413);
+        res.end(JSON.stringify({ error: 'Payload too large' }));
+        req.destroy();
+      }
+    });
     req.on('end', () => {
+      if (aborted) return;
       let command;
       try {
         command = JSON.parse(body);
@@ -56,7 +86,26 @@ const server = http.createServer((req, res) => {
   res.end(JSON.stringify({ error: 'Not found' }));
 });
 
-const wss = new WebSocket.Server({ server });
+// The Figma plugin UI runs in a sandboxed iframe and connects with Origin 'null'
+// (or a figma.com origin). Reject WebSocket upgrades from real websites so an
+// open browser tab can't hijack the plugin channel and intercept commands.
+function isAllowedWsOrigin(origin) {
+  if (isLocalOrigin(origin)) return true;
+  try {
+    return /(^|\.)figma\.com$/i.test(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+}
+
+const wss = new WebSocket.Server({
+  server,
+  verifyClient: ({ origin }, done) => {
+    if (isAllowedWsOrigin(origin)) return done(true);
+    console.warn('✗ Rejected WebSocket from origin:', origin);
+    done(false, 403, 'Forbidden origin');
+  },
+});
 
 wss.on('connection', (ws) => {
   pluginSocket = ws;
@@ -76,12 +125,12 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    pluginSocket = null;
+    if (pluginSocket === ws) pluginSocket = null;  // don't null out a newer connection
     console.log('✗ Figma plugin disconnected');
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Claude Bridge server running on http://localhost:${PORT}`);
+server.listen(PORT, HOST, () => {
+  console.log(`Claude Bridge server running on http://${HOST}:${PORT}`);
   console.log('Waiting for Figma plugin connection...');
 });
