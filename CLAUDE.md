@@ -168,7 +168,7 @@ curl -s -X POST http://localhost:3571/command \
 **Structure:**
 - `reparent` — move to new parent (`nodeId`, `newParentId`)
 - `delete_node` — delete (`nodeId`)
-- `batch` — multiple commands in one call (`commands: [{action, ...params}]`)
+- `batch` — multiple commands in one call (`commands: [{action, ...params}]`); a command may reference an earlier result with `{ "$ref": "<index-or-label>.<path>" }` and be tagged `"as": "<label>"` (see Batching)
 
 ## Colors
 
@@ -280,17 +280,32 @@ curl -s -X POST http://localhost:3571/command \
   }'
 ```
 
-### 2-pass execution model
+### Referencing earlier results — `$ref` (create + style in ONE batch)
 
-The only reason to split into multiple requests is when you need an ID returned by one command before you can write the next. Structure all work around this constraint:
+A command's params can reference an earlier command's result, so you can create a node and use its ID later in the **same** batch — no second round-trip. Use the object marker `{ "$ref": "<index-or-label>.<path>" }`:
 
-**Pass 1 — create all nodes** (one batch): create every frame, component, text, and shape needed for the entire task. Collect all returned IDs.
+- **By index:** `{ "$ref": "0.id" }` → the `id` field of command 0's result.
+- **By label:** tag a command with `"as": "<label>"`, then `{ "$ref": "<label>.id" }`.
+- Works anywhere in params, including inside arrays (e.g. `set_selection` → `nodeIds`).
+- A bad ref fails only that one command (returns `{ error }`); the rest of the batch still runs.
 
-**Pass 2 — style everything** (one batch): using the IDs from Pass 1, apply all fills, strokes, text content, text styles, layout properties, corner radii, spacing variables, color variables — everything — in a single batch.
+```json
+{ "action": "batch", "commands": [
+  { "action": "create_frame", "as": "card", "name": "Card", "width": 320, "height": 200, "parentId": "5:1" },
+  { "action": "create_text",  "text": "Title", "parentId": { "$ref": "card.id" } },
+  { "action": "set_layout",   "nodeId": { "$ref": "card.id" }, "mode": "VERTICAL", "gap": 12, "padding": 16 }
+] }
+```
 
-**Pass 3 — screenshot** (one request): take a single screenshot at the very end to verify the result. Do not screenshot after each section or each step.
+### Execution model — one batch wherever possible
 
-This means a complex screen with 30 nodes, 50 variable bindings, and 20 text overrides should take exactly 3 requests total.
+`$ref` removes the old reason to split work into passes (unknown IDs). Build the **whole** hierarchy and style it in a single batch: create each node with `as`, parent children via `parentId: { "$ref": "..." }`, then apply fills / text / layout / variables in the same or later commands using `$ref`.
+
+Only split into a second request when a later command needs a value **Figma computes** and you can't predict — final positions/sizes after auto-layout, or a bounding box you must read back with `get_tree` first. Then batch 1 builds, you read what you need, batch 2 corrects.
+
+**Screenshot last** (one request): a single screenshot at the very end to verify. Do not screenshot after each section or step.
+
+So a complex screen — 30 nodes, layout, 50 variable bindings, 20 text overrides — is typically **one build batch + one screenshot**, not three passes.
 
 ### Known API gotchas (do not repeat these mistakes)
 
@@ -308,10 +323,10 @@ This means a complex screen with 30 nodes, 50 variable bindings, and 20 text ove
 - **Prefer read → correct over pre-calculate.** If you're unsure about a position, size, or order: create it approximately, take a screenshot or get_tree, then fix with a targeted batch. This is faster than computing the perfect values upfront.
 - **Don't over-plan internally before writing code.** Write the first reasonable script and execute it — don't deliberate over layout details (step indicator structure, spacing edge cases, etc.) in your head before running. Internal deliberation adds wall-clock time just like extra API calls. If the result looks wrong, fix it from the screenshot in 30 seconds.
 - **Never send a request just to inspect state you already know.** If you just created a frame, you know its structure — don't `get_tree` to confirm it.
-- **Never send a separate request to apply variables after creation.** Variables go in Pass 2, immediately after getting IDs from Pass 1 — not in a later cleanup round.
+- **Apply variables in the same batch as creation** (reference the new node with `$ref`) — not in a later cleanup round.
 - **No mid-build screenshots.** Only screenshot at the end, or when something clearly went wrong and you need to diagnose it visually.
 - **Avoid re-reading variable IDs.** Call `get_variables` once at the start of the task. Cache the IDs mentally and reuse them throughout all batches.
-- **Only split passes when genuinely blocked on an unknown ID.** If you already know the ID, it goes in the current batch — not a new request.
+- **Never split a batch just for an unknown ID — use `$ref`.** Only split when a later command needs a value Figma computes (positions/sizes after layout).
 
 ## Visual hierarchy and spacing
 

@@ -1,6 +1,33 @@
 // Structural operations: reparenting, batching, layer order, grouping, pages, viewport.
 import { requireNode, nodeInfo } from '../lib/helpers.js';
 
+// Resolve { "$ref": "<index-or-label>.<path>" } markers in a batch command's params
+// against the results of earlier commands in the same batch. Plain values pass through,
+// so commands without any $ref behave exactly as before.
+function resolveRefs(value, scope) {
+  if (Array.isArray(value)) return value.map(v => resolveRefs(v, scope));
+  if (value && typeof value === 'object') {
+    if (typeof value.$ref === 'string') return lookupRef(value.$ref, scope);
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = resolveRefs(v, scope);
+    return out;
+  }
+  return value;
+}
+
+function lookupRef(ref, scope) {
+  const parts = ref.split('.');
+  const key = parts[0];
+  if (!(key in scope)) throw new Error(`batch ref "${ref}": no earlier command "${key}"`);
+  let cur = scope[key];
+  for (let i = 1; i < parts.length; i++) {
+    if (cur == null) throw new Error(`batch ref "${ref}": "${parts.slice(0, i).join('.')}" is null`);
+    cur = cur[parts[i]];
+  }
+  if (cur === undefined) throw new Error(`batch ref "${ref}": resolved to undefined`);
+  return cur;
+}
+
 export const structureHandlers = {
   async reparent(params) {
     const node = await requireNode(params.nodeId);
@@ -12,13 +39,25 @@ export const structureHandlers = {
   },
 
   async batch(params, dispatch) {
+    // Sub-commands run sequentially. A command's params may reference an earlier
+    // result via { "$ref": "<index-or-label>.<path>" }; tag a command with
+    // "as": "<label>" to reference it by name. Return shape is unchanged: one
+    // result per command, in order (failed commands become { error }).
     const results = [];
+    const scope = {};
+    let i = 0;
     for (const sub of params.commands) {
+      let result;
       try {
-        results.push(await dispatch(sub.action, sub));
+        const resolved = resolveRefs(sub, scope);
+        result = await dispatch(resolved.action, resolved);
       } catch (e) {
-        results.push({ error: e.message });
+        result = { error: e.message };
       }
+      results.push(result);
+      scope[String(i)] = result;
+      if (sub.as) scope[sub.as] = result;
+      i++;
     }
     return results;
   },

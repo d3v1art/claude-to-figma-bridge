@@ -1410,6 +1410,34 @@
   };
 
   // src/handlers/structure.js
+  function resolveRefs(value, scope) {
+    if (Array.isArray(value))
+      return value.map((v) => resolveRefs(v, scope));
+    if (value && typeof value === "object") {
+      if (typeof value.$ref === "string")
+        return lookupRef(value.$ref, scope);
+      const out = {};
+      for (const [k, v] of Object.entries(value))
+        out[k] = resolveRefs(v, scope);
+      return out;
+    }
+    return value;
+  }
+  function lookupRef(ref, scope) {
+    const parts = ref.split(".");
+    const key = parts[0];
+    if (!(key in scope))
+      throw new Error(`batch ref "${ref}": no earlier command "${key}"`);
+    let cur = scope[key];
+    for (let i = 1; i < parts.length; i++) {
+      if (cur == null)
+        throw new Error(`batch ref "${ref}": "${parts.slice(0, i).join(".")}" is null`);
+      cur = cur[parts[i]];
+    }
+    if (cur === void 0)
+      throw new Error(`batch ref "${ref}": resolved to undefined`);
+    return cur;
+  }
   var structureHandlers = {
     async reparent(params) {
       const node = await requireNode(params.nodeId);
@@ -1423,12 +1451,21 @@
     },
     async batch(params, dispatch2) {
       const results = [];
+      const scope = {};
+      let i = 0;
       for (const sub of params.commands) {
+        let result;
         try {
-          results.push(await dispatch2(sub.action, sub));
+          const resolved = resolveRefs(sub, scope);
+          result = await dispatch2(resolved.action, resolved);
         } catch (e) {
-          results.push({ error: e.message });
+          result = { error: e.message };
         }
+        results.push(result);
+        scope[String(i)] = result;
+        if (sub.as)
+          scope[sub.as] = result;
+        i++;
       }
       return results;
     },
