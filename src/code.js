@@ -177,13 +177,16 @@ async function executeAction(action, params) {
       const node = await figma.getNodeByIdAsync(params.nodeId);
       if (!node) throw new Error(`Node not found: ${params.nodeId}`);
       if (node.type !== 'TEXT') throw new Error('Node is not a text layer');
-      const len = node.characters.length || 1;
-      const fonts = new Set();
-      for (let i = 0; i < len; i++) {
-        const f = node.getRangeFontName(i, i + 1);
-        if (f !== figma.mixed) fonts.add(JSON.stringify(f));
+      // Load every font used in the node in one pass via segments, not a per-character loop.
+      const fonts = new Map();
+      for (const seg of node.getStyledTextSegments(['fontName'])) {
+        fonts.set(JSON.stringify(seg.fontName), seg.fontName);
       }
-      await Promise.all([...fonts].map(f => figma.loadFontAsync(JSON.parse(f))));
+      // Empty text nodes report no segments but still need their base font loaded.
+      if (fonts.size === 0 && node.fontName !== figma.mixed) {
+        fonts.set(JSON.stringify(node.fontName), node.fontName);
+      }
+      await Promise.all([...fonts.values()].map(f => figma.loadFontAsync(f)));
       const oldText = node.characters;
       node.characters = params.text;
       return { success: true, oldText, newText: node.characters };

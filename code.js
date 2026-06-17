@@ -241,14 +241,14 @@
             throw new Error(`Node not found: ${params.nodeId}`);
           if (node.type !== "TEXT")
             throw new Error("Node is not a text layer");
-          const len = node.characters.length || 1;
-          const fonts = /* @__PURE__ */ new Set();
-          for (let i = 0; i < len; i++) {
-            const f = node.getRangeFontName(i, i + 1);
-            if (f !== figma.mixed)
-              fonts.add(JSON.stringify(f));
+          const fonts = /* @__PURE__ */ new Map();
+          for (const seg of node.getStyledTextSegments(["fontName"])) {
+            fonts.set(JSON.stringify(seg.fontName), seg.fontName);
           }
-          yield Promise.all([...fonts].map((f) => figma.loadFontAsync(JSON.parse(f))));
+          if (fonts.size === 0 && node.fontName !== figma.mixed) {
+            fonts.set(JSON.stringify(node.fontName), node.fontName);
+          }
+          yield Promise.all([...fonts.values()].map((f) => figma.loadFontAsync(f)));
           const oldText = node.characters;
           node.characters = params.text;
           return { success: true, oldText, newText: node.characters };
