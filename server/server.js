@@ -77,6 +77,18 @@ const server = http.createServer((req, res) => {
       }, 15000);
 
       pending.set(id, { res, timeout });
+
+      // If the HTTP client disconnects before the plugin replies, drop the pending
+      // entry so the late response isn't written to a dead socket — which otherwise
+      // left a stale entry that could desync a later request's response.
+      res.on('close', () => {
+        const entry = pending.get(id);
+        if (entry) {
+          clearTimeout(entry.timeout);
+          pending.delete(id);
+        }
+      });
+
       pluginSocket.send(JSON.stringify(command));
     });
     return;
@@ -119,8 +131,11 @@ wss.on('connection', (ws) => {
     if (entry) {
       clearTimeout(entry.timeout);
       pending.delete(msg.id);
-      entry.res.writeHead(200);
-      entry.res.end(JSON.stringify(msg.result));
+      // Guard against a response arriving in the same tick the client disconnected.
+      if (!entry.res.writableEnded && !entry.res.destroyed) {
+        entry.res.writeHead(200);
+        entry.res.end(JSON.stringify(msg.result));
+      }
     }
   });
 
