@@ -1,29 +1,23 @@
 # Claude Bridge
 
-Figma plugin that gives Claude direct access to your Figma file — read and edit designs through natural language.
+Figma plugin + local server that gives Claude direct, scripted control of your Figma file — read and edit designs through natural language.
 
 ## How it works
 
-Claude uses **two complementary modes** to work with Figma:
+```
+        Claude Code
+            │  curl POST /command
+            ▼
+   Bridge server (localhost:3571)
+            │  WebSocket
+            ▼
+   Claude Bridge plugin (Figma)
+            │  Figma Plugin API
+            ▼
+       Your Figma file
+```
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                      Claude Code                        │
-├────────────────────────┬────────────────────────────────┤
-│   Bridge (edits)       │   Figma MCP (builds)           │
-│   curl → :3571         │   use_figma (JS in plugin)     │
-│   Best for: targeted   │   Best for: creating screens   │
-│   edits, variables,    │   and components from scratch  │
-│   reading state        │   in one round-trip            │
-└────────────┬───────────┴──────────────┬─────────────────┘
-             │                          │
-             ▼                          ▼
-    Bridge Server (:3571)      Figma MCP (mcp.figma.com)
-             │                          │
-             └──────────┬───────────────┘
-                        ▼
-                  Figma Plugin API
-```
+Claude sends a command (e.g. *"create an auth screen"*), the bridge relays it over a WebSocket to the plugin running in Figma, the plugin executes it through the Plugin API and returns the result. ~109 actions cover reading, creating, editing, variables, components, styles, and audits — all through one local HTTP endpoint. No Figma token or cloud MCP required.
 
 ## Setup
 
@@ -35,44 +29,41 @@ npm install
 node server.js
 ```
 
+Runs on `http://localhost:3571` (loopback only — not exposed to your network).
+
 ### 2. Load the plugin in Figma
 
-Figma Desktop → **Plugins → Development → Import plugin from manifest** → select `manifest.json`.
+Figma Desktop → **Plugins → Development → Import plugin from manifest** → select `manifest.json`. Run it — a green dot means connected.
 
-Run the plugin — green dot means connected.
+### 3. Talk to Claude
 
-### 3. Connect Figma MCP (one-time)
-
-The Figma MCP is pre-configured. On first use Claude will open an OAuth browser flow — no token needed, just approve in your Figma account. After that it's persistent.
-
-### 4. Talk to Claude
-
-Open Claude Code in this project folder. Claude reads `CLAUDE.md` automatically.
+Open Claude Code in this folder. Claude reads `CLAUDE.md` automatically and drives Figma through the bridge.
 
 ```
-"Create an auth screen with dark mode support"
+"Create a responsive sign-up screen"
 "Change all button labels to Sign Up"
+"Build a pricing page using our existing components"
+"Add a mobile variant of the dashboard"
 "Audit contrast on the current page"
-"Add a tablet variant of the dashboard"
 ```
 
-## When Claude uses which mode
+## Best practices (how to prompt)
 
-| Task | Mode used |
-|------|-----------|
-| Build a new screen from scratch | `use_figma` (MCP) |
-| Create components with variants | `use_figma` (MCP) |
-| Change text / color / variable | Bridge |
-| Read structure, audit, inspect | Bridge |
-| Apply variables or styles | Bridge |
-| Switch dark/light mode on a frame | Bridge |
-
-Both modes target the same Figma file and are fully compatible — Claude switches between them automatically based on the task.
+- **Everything is responsive by default.** Claude builds with auto-layout and proper `FILL`/`HUG`/`FIXED` sizing, so screens reflow when resized — you don't need to ask for it.
+- **Style is Claude's call unless you set rules.** For a quick mockup, Claude picks a clean, coherent look on its own. To enforce your design instead:
+  - *"use the existing components"* → Claude instances your library rather than drawing new UI
+  - *"use our tokens / variables"* → Claude binds existing variables and applies your text styles
+  - *"match this brand: …"* → Claude sticks to the palette and type you give it
+- **Name a file's conventions once.** Per-project notes live in `.figma-projects/{fileKey}/design.md` (private, git-ignored) — Claude reads and updates them so component IDs and style decisions persist across sessions.
+- **Ask for a screenshot** any time to see the result inline (*"show me a screenshot"*).
+- **Big builds are cheap.** Claude batches work into 2–3 requests, so *"build the whole onboarding flow"* in one go is fine.
 
 ## Development
 
 ```bash
 npm install
-npm run build   # build once
-npm run watch   # rebuild on changes
+npm run build   # build code.js (esbuild) + ui.html (vite)
+npm run watch   # rebuild on change
 ```
+
+Plugin source: `src/code.js` (thin entry, dispatches to handlers) → `src/handlers/*.js` (actions grouped by category) → `src/lib/helpers.js` (shared helpers). Server: `server/server.js`. After editing anything under `src/`, run `npm run build` and re-run the plugin in Figma to load the new bundle.

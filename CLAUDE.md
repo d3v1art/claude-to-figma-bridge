@@ -2,9 +2,9 @@
 
 This project includes a local bridge server that lets you control Figma directly.
 
-## Important: use the bridge, not use_figma
+## How you control Figma
 
-This project uses its own bridge to communicate with Figma via HTTP commands. **Do not use the `use_figma` tool** — use `curl` POST requests to `http://localhost:3571/command` instead. All Figma operations go through the bridge.
+All Figma operations go through this project's local **bridge** — `curl` POST requests to `http://localhost:3571/command`. This is the only mode: **do not use the `use_figma` tool or the Figma MCP.** Everything — reading, building, editing, auditing — is done through the bridge actions listed below.
 
 ## Connecting to Figma
 
@@ -179,26 +179,44 @@ Colors are passed as normalized floats `{r, g, b}` in range 0–1, not 0–255.
 { "r": 0.2, "g": 0.6, "b": 1 }  // blue
 ```
 
-## Layout behaviour
+## Design defaults
 
-Think like HTML/CSS. Sizing should reflect how the element actually behaves, not just its current size.
+Two defaults apply to everything you create, unless the designer says otherwise.
 
-**Sizing modes:**
-- `FILL` — element stretches to fill its parent (like `width: 100%`)
-- `HUG` — element wraps its content (like `width: fit-content`)
-- `FIXED` — explicit size, does not respond to content or parent
+### 1. Responsive by default
 
-**Rules:**
-- Containers that fill available space (sections, columns, cards inside a grid) → `FILL`
-- Elements that size from content (buttons, tags, labels, inline elements) → `HUG`
-- Elements with a defined size that doesn't change (icons, avatars, fixed sidebars) → `FIXED`
-- Modal windows, drawers, dialogs → `FILL` width + `maxWidth` for the constraint, `HUG` or `FIXED` height depending on content
-- Full-page sections → `FILL` both axes
-- Do not default to `HUG` for everything — it's the least common case in real layouts
+Every mockup you build must be **responsive in Figma** — it should reflow when its frame is resized, the way a real CSS layout does. This is not optional.
 
-**Images:**
-- Do not try to set real images unless explicitly provided
-- Use a placeholder frame with a gray fill and fixed dimensions instead
+- **Auto-layout everywhere.** Every container frame gets `set_layout` (`HORIZONTAL` / `VERTICAL`). Avoid absolutely-positioned children unless an element genuinely floats (badge, overlay, FAB) — then use `set_layout_positioning ABSOLUTE` + `set_constraints`.
+- **Choose sizing modes deliberately** (`set_sizing`, axis `horizontal` / `vertical` / `both`):
+  - `FILL` — stretches to fill the parent (like `width: 100%`). Sections, columns, grid cards, inputs in a form row.
+  - `HUG` — wraps its content (like `width: fit-content`). Buttons, tags, labels, inline elements.
+  - `FIXED` — explicit size that doesn't change. Icons, avatars, fixed sidebars.
+- **Constrain fluid elements:** modals / drawers / dialogs → `FILL` width + `set_min_max_size maxWidth`; full-page sections → `FILL` both axes.
+- **Top-level screen frame:** realistic viewport width (e.g. 1440 / 390), `FIXED` width, vertical auto-layout, `HUG` or `FIXED` height — its children `FILL` the width so the whole screen reflows.
+- Do not default to `HUG` for everything — `FILL` is the most common case in real layouts.
+
+**Auto-layout gotchas (these silently break responsiveness):**
+- `set_sizing FILL` only works when the **parent already has auto-layout** — set the parent's `set_layout` first, then set children to `FILL`.
+- A `HUG` parent collapses `FILL` children to zero width/height — a `FILL` child needs a parent that is `FILL` or `FIXED` on that axis.
+- `resize` resets a frame's sizing modes to `FIXED`. Apply `FILL` / `HUG` via `set_sizing` **after** any `resize`, never before.
+- `counterAxisAlignItems` does not accept `STRETCH` — to stretch children across the counter axis, set each child to `FILL` on that axis individually.
+
+### 2. Styling — your call, unless the designer sets rules
+
+When the designer has **not** specified visual rules, choose colors, typography, spacing and radii yourself with good taste — ship a clean, modern, coherent look. Don't ask "what colors?" for a quick mockup; just make it good.
+
+The moment the designer **does** name a system — "use the existing components", "use our library / tokens", "match this brand", "stick to the design system" — follow it strictly:
+- Reuse existing components via `create_instance` instead of drawing new ones (`get_local_components` first).
+- Bind existing variables / tokens (see Variables usage policy) and apply existing text styles via `apply_text_style`.
+- Never invent new tokens or one-off colors while a system is in force.
+
+Rule of thumb: **free styling by default, strict adherence the moment a system or brand is named.**
+
+### Images
+
+- Do not try to set real images unless explicitly provided.
+- Use a placeholder frame with a gray fill and fixed dimensions instead.
 - Name it clearly: `Image placeholder`, `Avatar placeholder`, `Cover image`, etc.
 
 ## Variables usage policy
@@ -245,37 +263,6 @@ After creating or editing **any** node (frame, section, component, container), i
 - Applying a style sets font, size, line-height, and letter-spacing in one step — always prefer it over setting properties individually
 - For components: apply the style to the base component's text node — it propagates to all instances automatically
 
-## Working with Figma — two modes
-
-Claude has two ways to interact with Figma. Use the right one for the task:
-
-### Mode 1: Bridge REST API (this file's primary mode)
-HTTP commands via `curl` to `localhost:3571`. Best for **targeted edits** — changing text, colors, variables, auditing, reading structure.
-
-### Mode 2: `use_figma` (Figma MCP — for complex builds)
-Executes arbitrary JavaScript directly in the Figma Plugin API context. Best for **building screens from scratch** — creating full node hierarchies with complex structure.
-
-**No token needed** — authentication is OAuth-based via `mcp__figma__authenticate` (one-time browser flow). After that, `use_figma` is available for the session.
-
-**When to use `use_figma` instead of the bridge:**
-- Creating a new screen, frame, or component from scratch with many nodes
-- Any task that would require 2+ bridge passes due to unknown IDs
-- Tasks where you need Figma Plugin API features not exposed by the bridge
-
-**When to stay with the bridge:**
-- Editing existing nodes (text, fills, variables, layout)
-- Reading design state (get_tree, get_variables, audit_*)
-- Applying variables, styles, or modes to existing nodes
-- Any task completable in 1 bridge batch
-
-**`use_figma` rules:**
-- Follow all rules from the `figma-use` skill (loaded automatically)
-- After executing `use_figma`, switch back to bridge for follow-up edits
-- `use_figma` and bridge target the same Figma file — they are fully compatible
-- **Always return all created node IDs** — including variant IDs from `componentSet.children`. Never guess IDs after the fact; read them from the script's return value and record in `design.md` immediately
-
----
-
 ## Batching commands — execute in as few round-trips as possible
 
 **Always use `batch` when making more than one change.** The goal is to complete any design task in the minimum number of curl requests — ideally 2–3 total, regardless of complexity.
@@ -312,25 +299,7 @@ This means a complex screen with 30 nodes, 50 variable bindings, and 20 text ove
 - **`set_text` does NOT work on INSTANCE nodes** — use `set_instance_property` with the full property key (e.g. `"Label#2044:0"`). Get keys via `get_instance_properties` first, or reuse keys from previous calls on the same component type.
 - **Fixed-size frames inside auto-layout must have `primaryAxisSizingMode = 'FIXED'` and `counterAxisSizingMode = 'FIXED'`** — if you create a frame with `layoutMode` set and then call `resize(w, h)`, auto-layout will still shrink it to fit content. Always set both sizing modes to `'FIXED'` before `resize()` on any frame that must hold a specific size (circles, icons, avatars).
 - **`set_layout` failures are partial** — if one property in a `set_layout` call throws (e.g. invalid `counterAlign`), properties set before the error DO apply, those after do NOT. Order the properties in `set_layout` to put safe ones first.
-- **Coordinates of nodes inside Figma Sections are RELATIVE to the section**, not absolute page coordinates. After appending frames to a section, always call `sectionResizeToFit(section, 100)` (see snippet below) — it computes the bounding box of all children, repositions them to `(pad, pad)`, adjusts the section origin to preserve absolute canvas positions, and resizes the section. This matches Figma's native "Resize to fit" behaviour with 100px padding.
-
-```js
-// use_figma snippet — reuse whenever creating or updating a section
-function sectionResizeToFit(section, pad) {
-  const children = section.children;
-  if (!children.length) return;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const c of children) {
-    minX = Math.min(minX, c.x);         minY = Math.min(minY, c.y);
-    maxX = Math.max(maxX, c.x + c.width); maxY = Math.max(maxY, c.y + c.height);
-  }
-  const dx = pad - minX, dy = pad - minY;
-  for (const c of children) { c.x += dx; c.y += dy; }
-  section.x -= dx; section.y -= dy;
-  section.resizeWithoutConstraints((maxX - minX) + pad * 2, (maxY - minY) + pad * 2);
-}
-```
-- **`findAll` / `page.findAll` is RECURSIVE** — it traverses the entire subtree, including children of children (components, frames, nested groups). Never use `container.findAll(n => n.type === 'TEXT').forEach(t => t.remove())` on a container that holds components — it will delete text nodes inside those components too. To remove only direct text children of a frame, use `frame.children.filter(n => n.type === 'TEXT').forEach(t => t.remove())`.
+- **Coordinates of nodes inside Figma Sections are RELATIVE to the section**, not absolute page coordinates — and sections do not auto-resize to fit their children. After appending frames to a section: `get_children` to read their boxes, compute the bounding box, `move` each child so the group sits at ~`(100, 100)` padding, then `resize` the section to `bbox + ~100px` on every side (Figma's native "Resize to fit"). Watch the relative-coordinate offset when positioning.
 
 ### Rules to enforce this
 
@@ -416,13 +385,13 @@ When adding variants or properties to an existing COMPONENT_SET:
 5. Existing instances on screens **inherit updates automatically** — no need to touch them unless the property keys changed
 6. Update `design.md` with new variant IDs and any changed property keys
 
-**After `combine_as_variants`**, apply Figma's default component set styling manually — the API does not add it automatically:
-1. `set.strokes = [{ type: 'SOLID', color: { r: 0.541, g: 0.220, b: 0.961 }, opacity: 1, visible: true, blendMode: 'NORMAL' }]`
-2. `set.strokeWeight = 1`, `set.strokeAlign = 'INSIDE'`
-3. Position each child variant at `x=20`, `y=20 + (prev heights + 30 gaps)` — no auto-layout on the set
-4. `set.resizeWithoutConstraints(PAD + maxChildWidth + PAD, totalHeight)`
+**After `combine_as_variants`**, apply the component-set styling via bridge actions — the API does not add it automatically:
+1. `set_strokes` on the set: one SOLID stroke in Figma's variant purple `{ r: 0.541, g: 0.220, b: 0.961 }`
+2. `set_stroke` weight `1`, align `INSIDE`
+3. `move` each child variant to `x=20`, stacking `y` by previous heights + ~30px gaps (the set has no auto-layout)
+4. `resize` the set to `pad + widest child + pad` × total height
 
-**Renaming a property** (`editComponentProperty` via `use_figma`) is safe — the internal `#ID` stays the same, instances update automatically and keep their overrides. Only the display name prefix changes.
+**Renaming a component property in place is not exposed by the bridge** — rename it manually in Figma if needed (the internal `#ID` is preserved, so instances keep their overrides). To change it programmatically, use the add-new → migrate → delete-old flow below.
 
 **Deleting a property** is destructive — all instance overrides for that property are permanently lost. If you need to replace a property: add the new one first, update all instances manually, then delete the old one.
 
