@@ -164,8 +164,8 @@ export const readHandlers = {
     // Walk scope (scopeId or current page), collect all INSTANCE nodes
     const scopeNode = await resolveScope(params.scopeId);
     const nodes = scopeNode.findAllWithCriteria({ types: ['INSTANCE'] });
-    return nodes.map(n => {
-      const mc = n.mainComponent;
+    return Promise.all(nodes.map(async n => {
+      const mc = await n.getMainComponentAsync();
       return {
         id: n.id,
         name: n.name,
@@ -174,7 +174,7 @@ export const readHandlers = {
         x: 'x' in n ? n.x : null,
         y: 'y' in n ? n.y : null,
       };
-    });
+    }));
   },
 
   async get_local_components(params) {

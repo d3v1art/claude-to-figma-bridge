@@ -89,7 +89,7 @@ export const componentsHandlers = {
     // params: nodeId
     const node = await requireNode(params.nodeId);
     if (node.type !== 'INSTANCE') throw new Error('Node is not a component instance');
-    const mainComp = node.mainComponent;
+    const mainComp = await node.getMainComponentAsync();
     const defsSource = mainComp?.parent?.type === 'COMPONENT_SET' ? mainComp.parent : mainComp;
     const defs = defsSource?.componentPropertyDefinitions ?? {};
     const vals = node.componentProperties ?? {};

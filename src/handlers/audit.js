@@ -80,9 +80,10 @@ export const auditHandlers = {
     // Find all detached instances (mainComponent is null)
     const scopeNode = await resolveScope(params.scopeId);
     const instances = scopeNode.findAllWithCriteria({ types: ['INSTANCE'] });
-    return instances
-      .filter(n => !n.mainComponent)
-      .map(n => ({ id: n.id, name: n.name, x: n.x, y: n.y, parentId: n.parent?.id, parentName: n.parent?.name }));
+    const withMain = await Promise.all(instances.map(async n => ({ n, mc: await n.getMainComponentAsync() })));
+    return withMain
+      .filter(({ mc }) => !mc)
+      .map(({ n }) => ({ id: n.id, name: n.name, x: n.x, y: n.y, parentId: n.parent?.id, parentName: n.parent?.name }));
   },
 
   async audit_hardcoded_colors(params) {

@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "npm run build:code && npm run build:ui",
-    "build:code": "esbuild src/code.js --bundle --outfile=code.js --format=iife --target=es6 --platform=browser",
+    "build:code": "esbuild src/code.js --bundle --outfile=code.js --format=iife --target=es2017 --platform=browser",
     "build:ui": "vite build && cp dist/src/ui/index.html ui.html",
     "watch": "concurrently \"npm run build:code -- --watch\" \"vite build --watch\""
   },

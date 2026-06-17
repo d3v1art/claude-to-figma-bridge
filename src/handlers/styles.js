@@ -1,4 +1,5 @@
 // Local paint, text, and effect styles.
+// Style getters/setters are async — required under `documentAccess: "dynamic-page"`.
 import { requireNode } from '../lib/helpers.js';
 
 export const stylesHandlers = {
@@ -14,10 +15,10 @@ export const stylesHandlers = {
     return { id: style.id, name: style.name };
   },
 
-  get_local_styles() {
+  async get_local_styles() {
     // Returns all local styles grouped by type
     const result = { paint: [], text: [], effect: [], grid: [] };
-    for (const s of figma.getLocalPaintStyles()) {
+    for (const s of await figma.getLocalPaintStylesAsync()) {
       result.paint.push({
         id: s.id, name: s.name,
         paints: s.paints.map(p => p.type === 'SOLID'
@@ -25,17 +26,17 @@ export const stylesHandlers = {
           : { type: p.type }),
       });
     }
-    for (const s of figma.getLocalTextStyles()) {
+    for (const s of await figma.getLocalTextStylesAsync()) {
       result.text.push({
         id: s.id, name: s.name,
         fontFamily: s.fontName.family, fontStyle: s.fontName.style,
         fontSize: s.fontSize, lineHeight: s.lineHeight, letterSpacing: s.letterSpacing,
       });
     }
-    for (const s of figma.getLocalEffectStyles()) {
+    for (const s of await figma.getLocalEffectStylesAsync()) {
       result.effect.push({ id: s.id, name: s.name, effects: s.effects });
     }
-    for (const s of figma.getLocalGridStyles()) {
+    for (const s of await figma.getLocalGridStylesAsync()) {
       result.grid.push({ id: s.id, name: s.name });
     }
     return result;
@@ -45,7 +46,7 @@ export const stylesHandlers = {
     // params: nodeId, styleId
     const node = await requireNode(params.nodeId);
     if (node.type !== 'TEXT') throw new Error('Node is not a text layer');
-    node.textStyleId = params.styleId;
+    await node.setTextStyleIdAsync(params.styleId);
     return { success: true };
   },
 
@@ -55,10 +56,10 @@ export const stylesHandlers = {
     const target = params.target ?? 'fills';
     if (target === 'fills') {
       if (!('fillStyleId' in node)) throw new Error('Node does not support fill styles');
-      node.fillStyleId = params.styleId;
+      await node.setFillStyleIdAsync(params.styleId);
     } else {
       if (!('strokeStyleId' in node)) throw new Error('Node does not support stroke styles');
-      node.strokeStyleId = params.styleId;
+      await node.setStrokeStyleIdAsync(params.styleId);
     }
     return { success: true };
   },
@@ -67,7 +68,7 @@ export const stylesHandlers = {
     // params: nodeId, styleId
     const node = await requireNode(params.nodeId);
     if (!('effectStyleId' in node)) throw new Error('Node does not support effect styles');
-    node.effectStyleId = params.styleId;
+    await node.setEffectStyleIdAsync(params.styleId);
     return { success: true };
   },
 

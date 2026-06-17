@@ -97,7 +97,8 @@ export const structureHandlers = {
     return { success: true };
   },
 
-  get_pages() {
+  async get_pages() {
+    await figma.loadAllPagesAsync();
     return figma.root.children.map(p => ({
       id: p.id,
       name: p.name,
@@ -105,24 +106,28 @@ export const structureHandlers = {
     }));
   },
 
-  switch_page(params) {
+  async switch_page(params) {
     // params: pageId
-    const page = figma.root.children.find(p => p.id === params.pageId);
-    if (!page) throw new Error(`Page not found: ${params.pageId}`);
-    figma.currentPage = page;
+    const page = await figma.getNodeByIdAsync(params.pageId);
+    if (!page || page.type !== 'PAGE') throw new Error(`Page not found: ${params.pageId}`);
+    await figma.setCurrentPageAsync(page);
     return { success: true, pageId: page.id, pageName: page.name };
   },
 
-  create_page(params) {
+  async create_page(params) {
     // params: name, index? (position, default: end)
     const page = figma.createPage();
     page.name = params.name ?? 'Page';
-    if (params.index !== undefined) figma.root.insertChild(params.index, page);
+    if (params.index !== undefined) {
+      await figma.loadAllPagesAsync();
+      figma.root.insertChild(params.index, page);
+    }
     return { id: page.id, name: page.name };
   },
 
-  delete_page(params) {
+  async delete_page(params) {
     // params: pageId
+    await figma.loadAllPagesAsync();
     if (figma.root.children.length <= 1) throw new Error('Cannot delete the only page');
     const page = figma.root.children.find(p => p.id === params.pageId);
     if (!page) throw new Error(`Page not found: ${params.pageId}`);
@@ -130,10 +135,10 @@ export const structureHandlers = {
     return { success: true };
   },
 
-  rename_page(params) {
+  async rename_page(params) {
     // params: pageId, name
-    const page = figma.root.children.find(p => p.id === params.pageId);
-    if (!page) throw new Error(`Page not found: ${params.pageId}`);
+    const page = await figma.getNodeByIdAsync(params.pageId);
+    if (!page || page.type !== 'PAGE') throw new Error(`Page not found: ${params.pageId}`);
     page.name = params.name;
     return { success: true, pageId: page.id, name: page.name };
   },
